@@ -1,0 +1,502 @@
+---
+title: "Decodificadores e Funções Objetivo Quarto Doc IC"
+author: "Maria Júlia Borges"
+format: html
+editor: visual
+---
+
+# Amostragem por Estratificação
+
+Este documento apresenta 3 decodificadores distintos e 2 funções objetivo, que serão utilizados posteriormente na função BRKGA, algoritmo genético capaz de encontrar boas soluções.
+
+O decodificador 1 ordena o vetor população, o 2 não ordena e o terceiro decodificador possui um vetor de chaves aleatórias u, em que cada elemento corresponde a algum do vetor X, além de um vetor b com números representando os valores de u que estão em cada intervalo L (estratos).
+
+A organização do documento por ser vista na guia "**Outline**".
+
+```{r}
+#| echo: FALSE 
+library(purrr)
+library(MultAlloc)
+library(BRKGA)
+library(TSOSA)
+```
+
+### Decod 1
+
+```{r}
+#| echo: FALSE  
+Decod1 <- function (u, X, L) {
+  u.ordenado <- sort(u) #vetor de chaves ordem crescente
+  px <- c(quantile(sort(X), probs = seq(0, 1, 0.01))) #percentis de x
+  percentil.escolhido <- sample(px[80: 99], 1, replace = F)
+  
+  #vetor com os pontos de corte
+  bi <- numeric(length(u.ordenado)) 
+  for (i in 1:length(u)) {
+    bi[i] = min(X) + percentil.escolhido * u.ordenado[i]/sum(u.ordenado[1:i])
+  }
+  
+  #Range dos pontos de corte com bi ordenado
+  pt.cortes <- unique(c(min(X)-1, sort(bi), max(X) + 1))
+  #corta o vetor X em estratos e aloca de acordo com os cortes
+  estratos <- cut(X, breaks = pt.cortes, labels = F) 
+  lista_estratos <- split(X, estratos)
+  names(lista_estratos) <- paste0('N', seq_along(lista_estratos))
+  
+  Nh <- c(sapply(lista_estratos, length)) #número de termos por estrato
+  Shx2 <- c(sapply(lista_estratos, var)) #variância por estrato
+  
+  ####Ajuste de Nh para tornar a solução viável
+  
+  estratos_inviaveis <- which(Nh < 2)
+  
+  if (length (estratos_inviaveis) > 0) {
+    maior_estrato <- which.max (Nh)
+    dif <- sum(2 - Nh[estratos_inviaveis])
+    Nh[estratos_inviaveis]<-2
+    Nh[maior_estrato] <- Nh[maior_estrato] - dif
+    
+    Shx2 <- rep(0,L)
+    for(i in 1:L) {
+      Shx2[i] <- var(X[1:Nh[i]]) #var do estrato = variância de 1 a Nh[1]
+      X <- X[-c(1:Nh[i])] #retira todos os valores de X
+    }
+  }
+  
+  NhSh = vector(length = (2*L))
+  NhSh[1:L] <- Nh
+  NhSh[(L+1):(2*L)] <- Shx2
+  (NhSh)
+  
+  return(NhSh)
+}
+```
+
+### Decod 2
+
+```{r}
+#| echo: FALSE
+Decod2 <- function (u, X, L) {
+  px <- c(quantile(sort(X), probs = seq(0, 1, 0.01))) #percentis de x
+  percentil.escolhido <- sample(px[80: 99], 1, replace = F)
+  
+  #vetor com os pontos de corte
+  bi <- numeric(length(u)) 
+  for (i in 1:length(u)) {
+    bi[i] = min(X) + percentil.escolhido * u[i]/sum(u[1:i])
+  }
+  
+  #Range dos pontos de corte com bi ordenado
+  pt.cortes <- unique(c(min(X)-1, sort(bi), max(X) + 1))
+  #corta o vetor X em estratos e aloca de acordo com os cortes
+  estratos <- cut(X, breaks = pt.cortes, labels = F) 
+  lista_estratos <- split(X, estratos)
+  names(lista_estratos) <- paste0('N', seq_along(lista_estratos))
+  
+  Nh <- c(sapply(lista_estratos, length)) #número de termos por estrato
+  Shx2 <- c(sapply(lista_estratos, var)) #variância por estrato
+  
+  ####Ajuste de Nh para tornar a solução viável
+ 
+  estratos_inviaveis <- which(Nh < 2)
+  
+  if (length (estratos_inviaveis) > 0) {
+    maior_estrato <- which.max(Nh)
+    dif <- sum(2 - Nh[estratos_inviaveis])
+    Nh[estratos_inviaveis]<-2
+    Nh[maior_estrato] <- Nh[maior_estrato] - dif
+    
+    Shx2 <- rep(0,L)
+    for(i in 1:L) {
+      Shx2[i] <- var(X[1:Nh[i]]) #var do estrato = variância de 1 a Nh[1]
+      X <- X[-c(1:Nh[i])] #retira todos os valores de X
+      }
+    }
+  
+  NhSh = vector(length = (2*L))
+  NhSh[1:L] <- Nh
+  NhSh[(L+1):(2*L)] <- Shx2
+  (NhSh)
+  
+  return(NhSh)
+}
+```
+
+### Decod 3c
+
+```{r}
+#| echo: FALSE
+Decod3c <- function(u, X, L)
+{
+  X.unico <- sort(unique(X))
+  
+  # Ajusta u automaticamente para o tamanho correto
+  u <- u[seq_len(length(X.unico))]
+  u.ordenado <- sort(u)
+  
+  b <- ceiling(u.ordenado * L)
+  b[b == 0] <- 1
+  b[b > L] <- L
+  
+  cortes.L <- seq(0, 1, length.out = L + 1)
+  
+  est.dec <- cut(
+    u.ordenado,
+    breaks = cortes.L,
+    labels = FALSE,
+    include.lowest = TRUE
+  )
+  
+  lista_est_dec <- split(u.ordenado, est.dec)
+  names(lista_est_dec) <- paste0("I", seq_along(lista_est_dec))
+  
+  Nh.I <- sapply(lista_est_dec, length)
+  
+  lista_X_unico_estratos <- split(X.unico, b)
+  
+  bc <- c()
+  
+  if (L > 1) {
+    for (k in 1:(L - 1)) {
+      estrato.k <- lista_X_unico_estratos[[as.character(k)]]
+      
+      if (!is.null(estrato.k) && length(estrato.k) > 0) {
+        bc <- c(bc, max(estrato.k))
+      }
+    }
+  }
+  
+  pt.cortes <- sort(unique(c(min(X) - 1, bc, max(X) + 1)))
+  
+  estratos_X <- cut(
+    X,
+    breaks = pt.cortes,
+    labels = FALSE,
+    include.lowest = TRUE
+  )
+  
+  lista_estratos_X <- split(X, estratos_X)
+  names(lista_estratos_X) <- paste0("E", seq_along(lista_estratos_X))
+  
+  Nh <- sapply(lista_estratos_X, length)
+  
+  Shx2 <- sapply(lista_estratos_X, function(v) {
+    if (length(v) > 1) var(v) else 0
+  })
+  estratos_inviaveis<-which(Nh<2)
+  if (length(estratos_inviaveis) > 0){
+    L <- length(Nh)
+    maior_estrato <- which.max(Nh)
+    dif <- sum(2-Nh[estratos_inviaveis])
+    Nh[estratos_inviaveis] <- 2
+    Nh[maior_estrato] <- Nh[maior_estrato]-dif
+    Shx2 <- rep(0,L)
+    for(i in 1:L) {
+      Shx2[i] <- var(X[1:Nh[i]])
+      X <- X[-c(1:Nh[i])]
+    }
+  }
+  
+  NhSh = vector(length = (2*L))
+  NhSh[1:L] <- Nh
+  NhSh[(L+1):(2*L)] <- Shx2
+  (NhSh)
+  
+  return(NhSh)
+}
+
+```
+
+### Fobj 1 (Coeficientes de Variação)
+
+```{r}
+#| echo: false
+
+Fobj1 <- function (NhSh, n, L, X)
+{
+  
+  Shx2[is.na(Shx2)] <- 0
+  
+  Nh <- NhSh[1:L]
+  Shx2 <- NhSh[(L+1):(2*L)]
+  den.ney <- sum(Nh * sqrt(Shx2))
+  
+  #se den.ney for 0 ou na, substituir por valor insignificante p/ divisão dar certo
+  if(is.na(den.ney) || den.ney == 0){den.ney <- 1e-6}
+  
+  nh <- vector(length = L)
+  for (h in 1:L){
+    termo_sqrt <- if(is.na(Shx2[h]) || Shx2[h] < 0) 0 else sqrt(Shx2[h])
+    #amostra por estrato usando neyman, sqrt(Shx2) pois é desv.pad
+    a <- (n * Nh[h] * termo_sqrt)/ (den.ney)
+    a <- round(a)
+    a <- max(2, a)
+    a <- min(a, Nh[h])
+    nh[h] <- a
+  }
+  
+  soma.n = sum(nh)
+  if (soma.n != n){
+    if (soma.n > n){
+      excesso = soma.n - n
+      while (excesso>0){
+        qr <- which.max(nh)
+        nh[qr] <- nh[qr]-1
+        excesso <- excesso-1
+    }
+  }
+  else {
+    falta = n-soma.n
+    while (falta > 0) {
+      qr <- which.max(Nh-nh)
+      nh[qr] <- nh[qr]+1
+      falta <- falta-1
+      }
+    }
+    soma.n <- sum(nh)
+  }
+  
+  #forçando os estratos vazios ficarem com o valr mínimo
+  nh[nh == 0] <- 2
+  vtx <- sum((Nh**2) * (Shx2/nh) * (1 - (nh/Nh)), na.rm = TRUE)
+  #coeficiente de varição
+  cv = 100 * sqrt(vtx)/sum(X)
+  return(cv)
+}
+```
+
+### Fobj 2 (Multialloc): Função BSSM_FD
+
+```{r}
+#| echo: FALSE
+
+Fobj2 <- function(NhSh, n, L, X){
+  result <- BSSM_FD (Nh = NhSh[1:L],
+                     Sh2j = NhSh[(L+1):(2*L)] ,
+                     Yj = sum(X),
+                     Cust = n)
+  return(result$cvs)
+}
+```
+
+### Pop1: população uniforme \| N = 1000
+
+```{r}
+#| echo: FALSE
+
+L <- 7 # número de estratos
+u <- c(runif((L-1), 0, 1)) #número de cortes 
+X <- c(runif(1000, 1, 30))
+
+#Rodando a Fobj1 para cada resultado dos decoders de uma vez usando o purrr (pacote)
+
+valor_n <- 100
+
+resultado.D1 <- Decod1(u, X, L)
+resultado.D2 <- Decod2(u, X, L)
+
+#usando u2 pois o decod3c usa u diferente
+u2 <- runif(length(unique(X)), 0, 1)
+resultado.D3 <- Decod3c(u2,X,L) 
+
+#NhSh's dos Decods
+
+entradas <- list(resultado.D1, resultado.D2, resultado.D3)
+
+resultados.pop1.f1 <- map(entradas, Fobj1, n = valor_n, L = L, X = X)
+print(resultados.pop1.f1)
+
+resultados.pop1.f2 <- map(entradas, Fobj2, n = valor_n, L = L, X = X)
+print(resultados.pop1.f2)
+
+```
+
+### Pop2: população normal \| N = 25000
+
+```{r}
+#| echo: false
+
+L <- 7 # número de estratos
+u <- c(runif((L-1), 0, 1)) #número de cortes
+X <- rnorm(25000, mean = 5000, sd = 156) #média e variância arbitrárias
+set.seed(123)
+
+#Rodando a Fobj1 para cada resultado dos decoders de uma vez usando o purrr (pacote)
+
+valor_n <- 200
+
+resultado.D1 <- Decod1(u, X, L)
+resultado.D2 <- Decod2(u, X, L)
+
+#usando u2 pois o decod3c usa u diferente
+u2 <- runif(length(unique(X)), 0, 1)
+resultado.D3 <- Decod3c(u2,X,L) 
+
+#NhSh's de cada Decod
+entradas <- list(resultado.D1, resultado.D2, resultado.D3)
+
+resultados.pop2.f1 <- map(entradas, Fobj1, n = valor_n, L = L, X = X)
+print(resultados.pop2.f1)
+
+resultados.pop2.f2 <- map(entradas, Fobj2, n = valor_n, L = L, X = X)
+print(resultados.pop2.f2)
+```
+
+### Pops TSOSA
+
+Para acessar às populações, basta escrever "data( )" no terminal.
+
+### Pop3: população "AgrMinas" \| N = 844
+
+```{r}
+#| echo: false
+
+L <- 7 # número de estratos
+u <- c(runif((L-1), 0, 1)) #número de cortes
+X <- AgrMinas
+set.seed(123)
+
+#Rodando a Fobj1 para cada resultado dos decoders de uma vez usando o purrr (pacote)
+
+valor_n <- 100
+
+resultado.D1 <- Decod1(u, X, L)
+resultado.D2 <- Decod2(u, X, L)
+
+#usando u2 pois o decod3c usa u diferente
+u2 <- runif(length(unique(X)), 0, 1)
+resultado.D3 <- Decod3c(u2,X,L) 
+
+#NhSh's de cada Decod
+entradas <- list(resultado.D1, resultado.D2, resultado.D3)
+
+resultados.pop3.f1 <- map(entradas, Fobj1, n = valor_n, L = L, X = X)
+print(resultados.pop3.f1)
+
+resultados.pop3.f2 <- map(entradas, Fobj2, n = valor_n, L = L, X = X)
+print(resultados.pop3.f2)
+```
+
+### Pop4: população "BeeFarms" \| N = 430
+
+```{r}
+#| echo: false  
+L <- 7 # número de estratos 
+u <- c(runif((L-1), 0, 1)) #número de cortes 
+X <- BeeFarms 
+
+#Rodando a Fobj1 para cada resultado dos decoders de uma vez usando o purrr (pacote)  
+valor_n <- 100  
+resultado.D1 <- Decod1(u, X, L) 
+resultado.D2 <- Decod2(u, X, L)  
+
+#usando u2 pois o decod3c usa u diferente 
+u2 <- runif(length(unique(X)), 0, 1) 
+resultado.D3 <- Decod3c(u2,X,L) 
+
+#NhSh's de cada Decod 
+entradas <- list(resultado.D1, resultado.D2, resultado.D3) 
+
+resultados.pop4.f1 <- map(entradas, Fobj1, n = valor_n, L = L, X = X) 
+print(resultados.pop4.f1)
+
+resultados.pop4.f2 <- map(entradas, Fobj2, n = valor_n, L = L, X = X)
+print(resultados.pop4.f2)
+```
+
+### Pop5: população "Coffe" \| N = 18570
+
+```{r}
+#| echo: false  
+L <- 7 # número de estratos 
+u <- c(runif((L-1), 0, 1)) #número de cortes 
+X <- Coffe
+
+#Rodando a Fobj1 para cada resultado dos decoders de uma vez usando o purrr (pacote)  
+valor_n <- 200  #n = 200 pois são + de 17 mil entradas
+resultado.D1 <- Decod1(u, X, L) 
+resultado.D2 <- Decod2(u, X, L)  
+
+#usando u2 pois o decod3c usa u diferente 
+u2 <- runif(length(unique(X)), 0, 1) 
+resultado.D3 <- Decod3c(u2,X,L) 
+
+#NhSh's de cada Decod 
+entradas <- list(resultado.D1, resultado.D2, resultado.D3) 
+
+resultados.pop5.f1 <- map(entradas, Fobj1, n = valor_n, L = L, X = X) 
+print(resultados.pop5.f1)
+
+resultados.pop5.f2 <- map(entradas, Fobj2, n = valor_n, L = L, X = X)
+print(resultados.pop5.f2)
+```
+
+### Pop6: População "Kozak1" \| N = 4000
+
+```{r}
+#| echo: false
+  
+L <- 7 # número de estratos 
+u <- c(runif((L-1), 0, 1)) #número de cortes 
+X <- Kozak1
+
+#Rodando a Fobj1 para cada resultado dos decoders de uma vez usando o purrr (pacote)  
+valor_n <- 200  #n = 200 pois são + de 17 mil entradas
+resultado.D1 <- Decod1(u, X, L) 
+resultado.D2 <- Decod2(u, X, L)  
+
+#usando u2 pois o decod3c usa u diferente 
+u2 <- runif(length(unique(X)), 0, 1) 
+resultado.D3 <- Decod3c(u2,X,L) 
+
+#NhSh's de cada Decod 
+entradas <- list(resultado.D1, resultado.D2, resultado.D3) 
+
+resultados.pop6.f1 <- map(entradas, Fobj1, n = valor_n, L = L, X = X) 
+print(resultados.pop6.f1)
+
+resultados.pop6.f2 <- map(entradas, Fobj2, n = valor_n, L = L, X = X)
+print(resultados.pop6.f2)
+```
+
+### Pop7 : População "CensoCO"\| N = 9977
+
+```{r}
+#| echo: false
+
+L <- 7 # número de estratos 
+u <- c(runif((L-1), 0, 1)) #número de cortes 
+X <- CensoCO
+
+#Rodando a Fobj1 para cada resultado dos decoders de uma vez usando o purrr (pacote)  
+valor_n <- 200  #n = 200 pois são + de 17 mil entradas
+resultado.D1 <- Decod1(u, X, L) 
+resultado.D2 <- Decod2(u, X, L)  
+
+#usando u2 pois o decod3c usa u diferente 
+u2 <- runif(length(unique(X)), 0, 1) 
+resultado.D3 <- Decod3c(u2,X,L) 
+
+#NhSh's de cada Decod 
+entradas <- list(resultado.D1, resultado.D2, resultado.D3) 
+
+resultados.pop7.f1 <- map(entradas, Fobj1, n = valor_n, L = L, X = X) 
+print(resultados.pop7.f1)
+
+resultados.pop7.f2 <- map(entradas, Fobj2, n = valor_n, L = L, X = X)
+print(resultados.pop7.f2)
+```
+
+# Anotações
+
+```{r}
+'''
+Isso não está dando certo pq o comprimento de NhSh nem sempre é 2L, por que X pode pegar pontos de corte superiores ao número máximo dele, o que faz com que se tenha menos estratos do que o esperado. tem que consertar isso.
+
+Precisei substituir as Shx2 por 0 onde era na, além substituir por 1e-6, onde den.ney resultou em na ou 0, já que é o denominador de neyman
+den.ney é NA, quando pelo menos um dos estratos calcula uma Shx2 negativa ou gerou um NA.
+Nas populações reais (TSOSA), se tiver dados faltantes (NA) ou estratos com 1 elemento, a função var()  retorna NA.
+
+Baseando-se nos valores resultantes de cv, aparentemente para populações grandes e n=200, o melhor decodificador é o 3. Já para populações menores que 1000, se n=100, o melhor decoder é o 2.
+'''
+```
