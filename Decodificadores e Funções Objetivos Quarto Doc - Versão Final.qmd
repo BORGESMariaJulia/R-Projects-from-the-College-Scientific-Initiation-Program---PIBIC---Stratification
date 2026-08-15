@@ -1,0 +1,675 @@
+---
+title: "Decodificadores e Funções Objetivo Quarto Doc IC"
+author: "Maria Júlia Borges"
+format: html
+editor: visual
+---
+
+# Amostragem por Estratificação
+
+Este documento apresenta 3 decodificadores distintos e 2 funções objetivo, que serão utilizados posteriormente na função BRKGA, algoritmo genético capaz de, neste caso, encontrar boas soluções de pontos de cortes para estratificação das populações.
+
+O decodificador 1 ordena o vetor população, o 2 não ordena e o terceiro decodificador possui um vetor de chaves aleatórias u, em que cada elemento corresponde a algum do vetor X, além de um vetor b com números representando os valores de u que estão em cada intervalo L (estratos).
+
+A organização do documento por ser vista na guia "**Outline**".
+
+```{r}
+#| echo: FALSE 
+library(tidyverse)
+library(MultAlloc)
+library(BRKGA)
+library(TSOSA)
+library(dplyr)
+library(stratification)
+library(writexl)
+library(readxl)
+library(stringr)
+library(ggplot2)
+```
+
+### Decod 1
+
+```{r}
+#| echo: FALSE  
+Decod1 <- function (u, XL) {
+  X<-XL$X
+  L<-XL$L
+  u.ordenado <- sort(u) #vetor de chaves ordem crescente
+  px <- c(quantile(sort(X), probs = seq(0, 1, 0.01))) #percentis de x
+  percentil.escolhido <- sample(px[80: 99], 1, replace = F)
+  
+  #vetor com os pontos de corte
+  bi <- numeric(length(u.ordenado)) 
+  for (i in 1:length(u)) {
+    bi[i] = min(X) + percentil.escolhido * u.ordenado[i]/sum(u.ordenado[1:i])
+  }
+  
+  #Range dos pontos de corte com bi ordenado
+  pt.cortes <- unique(c(min(X)-1, sort(bi), max(X) + 1))
+  #corta o vetor X em estratos e aloca de acordo com os cortes
+  estratos <- cut(X, breaks = pt.cortes, labels = F) 
+  lista_estratos <- split(X, estratos)
+  names(lista_estratos) <- paste0('N', seq_along(lista_estratos))
+  
+  Nh <- c(sapply(lista_estratos, length)) #número de termos por estrato
+  Shx2 <- c(sapply(lista_estratos, var)) #variância por estrato
+  
+  ####Ajuste de Nh para tornar a solução viável
+ 
+  L.novo <- length(Nh) # Obs4 em anotações
+  
+  estratos_inviaveis <- which(Nh < 2)
+  if (length (estratos_inviaveis) > 0) {
+    maior_estrato <- which.max (Nh)
+    dif <- sum(2 - Nh[estratos_inviaveis])
+    Nh[estratos_inviaveis]<-2
+    Nh[maior_estrato] <- Nh[maior_estrato] - dif
+    
+    Shx2 <- rep(0,L.novo)
+    for(i in 1:L.novo) {
+      Shx2[i] <- var(X[1:Nh[i]]) #var dos h estratos utiizando o novo tam de L 
+      X <- X[-c(1:Nh[i])] #retira todos os valores de X
+    }
+  }
+  
+  length(Nh) <- L
+  length(Shx2) <- L
+  Nh[is.na(Nh)] <- 0
+  Shx2[is.na(Shx2)]<- 0
+  
+  NhSh = vector(length = (2*L))
+  NhSh[1:L] <- Nh
+  NhSh[(L+1):(2*L)] <- Shx2
+  (NhSh)
+  
+  return(NhSh)
+}
+```
+
+### Decod 2
+
+```{r}
+#| echo: FALSE
+Decod2 <- function (u, XL) {
+  X<-XL$X
+  L<-XL$L
+  px <- c(quantile(sort(X), probs = seq(0, 1, 0.01))) #percentis de x
+  percentil.escolhido <- sample(px[80: 99], 1, replace = F)
+  
+  #vetor com os pontos de corte
+  bi <- numeric(length(u)) 
+  for (i in 1:length(u)) {
+    bi[i] = min(X) + percentil.escolhido * u[i]/sum(u[1:i])
+  }
+  
+  #Range dos pontos de corte com bi ordenado
+  pt.cortes <- unique(c(min(X)-1, sort(bi), max(X) + 1))
+  #corta o vetor X em estratos e aloca de acordo com os cortes
+  estratos <- cut(X, breaks = pt.cortes, labels = F) 
+  lista_estratos <- split(X, estratos)
+  names(lista_estratos) <- paste0('N', seq_along(lista_estratos))
+  
+  Nh <- c(sapply(lista_estratos, length)) #número de termos por estrato
+  Shx2 <- c(sapply(lista_estratos, var)) #variância por estrato
+  
+  ####Ajuste de Nh para tornar a solução viável
+  
+  L.novo <- length(Nh) # Obs4 em anotações
+  estratos_inviaveis <- which(Nh < 2)
+  
+  if (length (estratos_inviaveis) > 0) {
+    maior_estrato <- which.max(Nh)
+    dif <- sum(2 - Nh[estratos_inviaveis])
+    Nh[estratos_inviaveis]<-2
+    Nh[maior_estrato] <- Nh[maior_estrato] - dif
+    
+    Shx2 <- rep(0,L.novo)
+    for(i in 1:L.novo) {
+      Shx2[i] <- var(X[1:Nh[i]]) #var do estrato = variância de 1 a Nh[1]
+      X <- X[-c(1:Nh[i])] #retira todos os valores de X
+      }
+    }
+  
+  length(Nh) <- L
+  length(Shx2) <- L
+  Nh[is.na(Nh)] <- 0
+  Shx2[is.na(Shx2)]<- 0
+  
+  NhSh = vector(length = (2*L))
+  NhSh[1:L] <- Nh
+  NhSh[(L+1):(2*L)] <- Shx2
+  (NhSh)
+  
+  return(NhSh)
+}
+```
+
+### Decod 3c
+
+```{r}
+#| echo: FALSE
+Decod3c <- function(u, XL)
+{
+  X<-XL$X
+  L<-XL$L
+  X.unico <- sort(unique(X))
+  
+  # Ajusta u automaticamente para o tamanho correto
+  u <- u[seq_len(length(X.unico))]
+  u.ordenado <- sort(u)
+  
+  b <- ceiling(u.ordenado * L)
+  b[b == 0] <- 1
+  b[b > L] <- L
+  
+  cortes.L <- seq(0, 1, length.out = L + 1)
+  
+  est.dec <- cut(
+    u.ordenado,
+    breaks = cortes.L,
+    labels = FALSE,
+    include.lowest = TRUE
+  )
+  
+  lista_est_dec <- split(u.ordenado, est.dec)
+  names(lista_est_dec) <- paste0("I", seq_along(lista_est_dec))
+  
+  Nh.I <- sapply(lista_est_dec, length)
+  
+  lista_X_unico_estratos <- split(X.unico, b)
+  
+  bc <- c()
+  
+  if (L > 1) {
+    for (k in 1:(L - 1)) {
+      estrato.k <- lista_X_unico_estratos[[as.character(k)]]
+      
+      if (!is.null(estrato.k) && length(estrato.k) > 0) {
+        bc <- c(bc, max(estrato.k))
+      }
+    }
+  }
+  
+  pt.cortes <- sort(unique(c(min(X) - 1, bc, max(X) + 1)))
+  
+  estratos_X <- cut(
+    X,
+    breaks = pt.cortes,
+    labels = FALSE,
+    include.lowest = TRUE
+  )
+  
+  lista_estratos_X <- split(X, estratos_X)
+  names(lista_estratos_X) <- paste0("E", seq_along(lista_estratos_X))
+  
+  Nh <- sapply(lista_estratos_X, length)
+  
+  Shx2 <- sapply(lista_estratos_X, function(v) {
+    if (length(v) > 1) var(v) else 0
+  })
+  
+  ####Ajuste de Nh para tornar a solução viável
+  
+  L.novo <- length(Nh) # Obs4 em anotações
+  estratos_inviaveis<-which(Nh<2)
+  
+  if (length(estratos_inviaveis) > 0){
+    maior_estrato <- which.max(Nh)
+    dif <- sum(2-Nh[estratos_inviaveis])
+    Nh[estratos_inviaveis] <- 2
+    Nh[maior_estrato] <- Nh[maior_estrato]-dif
+    
+    Shx2 <- rep(0,L.novo)
+    for(i in 1:L.novo) {
+      Shx2[i] <- var(X[1:Nh[i]])
+      X <- X[-c(1:Nh[i])]
+    }
+  }
+  
+  length(Nh) <- L
+  length(Shx2) <- L
+  Nh[is.na(Nh)] <- 0
+  Shx2[is.na(Shx2)]<- 0
+  
+  NhSh = vector(length = (2*L))
+  NhSh[1:L] <- Nh
+  NhSh[(L+1):(2*L)] <- Shx2
+  (NhSh)
+  
+  return(NhSh)
+}
+
+```
+
+### Fobj 1 (Coeficientes de Variação)
+
+```{r}
+#| echo: false
+
+Fobj1 <- function (n,NhSh,XL){
+  L<-XL$L
+  X<-XL$X
+  Nh <- NhSh[1:L]
+  Shx2 <- NhSh[(L+1):(2*L)]
+  
+  invNh<-is.na(Nh)
+  invSh2x<-is.na(Shx2)
+  if ((any(invNh)==TRUE) || (any(invSh2x)==TRUE)) {
+    if (XL$retorno==FALSE) return(10^10) else return(c(10^10,rep(0,L)))
+  }
+  else
+  {den.ney <- sum(Nh * sqrt(Shx2))
+  nh <- vector(length = L)
+  for (h in 1:L){
+    termo_sqrt <- sqrt(Shx2[h])
+     a <- (n * Nh[h] * termo_sqrt)/ (den.ney)
+     a <- round(a)
+     a <- min(max(2, a),Nh[h])
+     nh[h] <- a
+  }
+  
+  soma.n = sum(nh)
+  if (soma.n != n){
+    if (soma.n > n){
+      excesso = soma.n - n
+      while (excesso>0){
+        qr <- which.max(nh)
+        nh[qr] <- nh[qr]-1
+        excesso <- excesso-1
+    }
+  }
+  else {
+    falta = n-soma.n
+    while (falta > 0) {
+      qr <- which.max(Nh-nh)
+      nh[qr] <- nh[qr]+1
+      falta <- falta-1
+        }
+      }
+    soma.n <- sum(nh)
+    }
+  }
+  
+  #forçando os estratos vazios ficarem com o valor mínimo
+  #nh[nh == 0] <- 2
+  
+  vtx <- sum((Nh**2) * (Shx2/nh) * (1 - (nh/Nh)))
+  #coeficiente de varição
+  cv = 100 * sqrt(vtx)/sum(X)
+   if (XL$retorno==FALSE) 
+     return(cv) 
+  else 
+    return(c(cv,nh))
+  
+}
+```
+
+### Fobj 2 (Multialloc): Função BSSM_FD
+
+```{r}
+#| echo: FALSE
+
+Fobj2 <- function(n,NhSh, XL){
+  L<-XL$L
+  X<-XL$X
+  Nh.valores <- NhSh[1:L]
+  Shx2.valores <- NhSh[(L+1):(2*L)]
+   
+  #valores válidos de estrato;
+  valval <- Nh.valores > 0 
+  
+  result <- BSSM_FD (Nh = Nh.valores[valval],
+                     Sh2j = Shx2.valores[valval] ,
+                     Yj = sum(X),
+                     Cust = n)
+  if (XL$retorno==FALSE) 
+    return(100*result$cvs) 
+  else return(c(100*result$cvs,result$nh))
+    
+}
+```
+
+### Gerando pops artificiais
+
+```{r}
+#| echo: FALSE
+
+unif.1k<-runif(1000,min=1,max=50)
+unif.25k<-runif(25000,min=1,max=50)
+norm.1k<-rnorm(1000, mean=602,sd= 45)
+norm.25k<-rnorm(25000,mean=170,sd=6)
+gama.5k<-rgamma(5000, shape=2, scale=1250 )
+gama.10k<-rgamma(10000, shape=0.5, rate=0.1)
+exp.5k<-rexp(5000, rate=0.5 )
+exp.50k<-rexp(50000,rate=0.000125 )
+quiq.5k<-rchisq(5000, df=4 )
+quiq.25k<-rchisq(25000, df=15)
+
+C1.pops<-list(unif.1k,unif.25k,norm.1k,norm.25k,gama.5k,
+              gama.10k,exp.5k, exp.50k, quiq.5k,quiq.25k)
+
+C2.pops<-list(AgrMinas=AgrMinas, BeeFarms=BeeFarms, CensoCO=CensoCO,
+              Coffe=Coffe, HHinctot=HHinctot, Kozak2=Kozak2,
+              pop2911=pop2911, SugarCaneFarms=SugarCaneFarms,
+              TRI900=TRI900, Ucensus2021=Ucensus2021)
+
+```
+
+## Laços for para achar CVs
+
+```{r}
+#| echo: FALSE
+
+datag.final<-NULL
+
+C.pops<-list(unif.1k=unif.1k,unif.25k=unif.25k,norm.1k=norm.1k,
+             norm.25k=norm.25k,gama.5k=gama.5k, gama.10k=gama.10k,
+             exp.5k=exp.5k, exp.50k=exp.50k, quiq.5k=quiq.5k,
+             quiq.25k= quiq.25k,
+             AgrMinas=AgrMinas, BeeFarms=BeeFarms, CensoCO=CensoCO,
+             Coffe=Coffe, HHinctot=HHinctot, Kozak2=Kozak2,
+             pop2911=pop2911, SugarCaneFarms=SugarCaneFarms,
+             TRI900=TRI900, Ucensus2021=Ucensus2021)
+
+decods<-list(Decod1, Decod2, Decod3c)
+valores_n<-c(100,200)
+valores_L<-c(3,4,5)
+funcoes<-list(Fobj2)
+
+lista<-list()
+k<-1
+#LAÇOS FOR SEM BRKGA
+datag=NULL
+nomes.decodificadores<-c('D1', 'D2', 'D3')
+nomes.funcoes<-c('F2')
+
+replicas<-10
+for (nome.pop in names(C.pops[1:20])){
+  p<-C.pops[[nome.pop]]
+  td=0
+  for (d in decods){
+    td=td+1
+    tf=0
+    for (f in funcoes){
+      tf=tf+1
+      for (vl in valores_L){
+        for (vn in valores_n){
+          data.result=NULL
+          for (rp in (1:replicas)){
+            XL<-list(X=p, L=vl, retorno=FALSE)
+            X<-p
+            L<-vl
+            u <- if(identical(d,Decod3c)) runif(length(unique(p)), 0, 1)  
+                    else(runif(vl-1, 0, 1))
+            n.escolhido=c(length(unique(X)),L-1)
+            result.brkga<-brkga(Data = vn,
+                              Fo=f,
+                              Dc=d,
+                              n=ifelse(td==3, n.escolhido[1], n.escolhido[2]),
+                              p=100,
+                              ng=500,
+                              ngw=100,
+                              MaxTime = 180,
+                              Exa1=list(X=p,L=vl),
+                              Exa2=list(X=p,L=vl,retorno=F)
+                              )
+            dados=data.frame(pop=nome.pop, 
+                             Algoritmo= paste(nomes.decodificadores[td], 
+                                              nomes.funcoes[tf], sep = '.'),
+                             nexecucao=k, 
+                             L=vl, 
+                             n=vn, 
+                             cv=result.brkga$fbest, 
+                             tempo=result.brkga$cpu_time)
+            
+            data.result=rbind(data.result, dados)
+            k<-k+1
+          }
+          datag=rbind(datag, data.result) #dataframe global
+        }
+      }
+    }
+  }
+}
+
+datag.kozak<-NULL
+k<-1
+for (nome.pop in names(C.pops[1:20])){
+  p<-C.pops[[nome.pop]]
+  for (vl in valores_L){
+    for (vn in valores_n){
+      data.result.kozak<-NULL
+      for ( rp in 1:replicas){
+        t0<-Sys.time()
+        r=strata.LH(x=p, n=vn, Ls=vl)
+        t1<-Sys.time()
+        
+        cv.kozak <- 100 * sqrt(sum(r$varh * r$Nh /(r$Nh-1) *r$Nh^2 /r$nh *
+        (1 - r$nh / r$Nh))) / sum(p)
+        dados=data.frame(pop=nome.pop, 
+                         Algoritmo= 'ESTRAT.KOZAK',
+                         L=vl, 
+                         n=vn, 
+                         nexecucao=k, 
+                         cv=cv.kozak,
+                         tempo=as.numeric(difftime(t1,t0, units = 'secs')))
+        data.result.kozak<-rbind(data.result.kozak, dados)
+        k<-k+1
+      }
+     datag.kozak<-rbind(datag.kozak, data.result.kozak)
+    }
+  }
+}
+
+datag.final<-rbind(datag, datag.kozak)
+
+write.table(datag.final, file = "resultados.csv", sep = ";", dec="," , 
+            col.names = TRUE, row.names=FALSE)
+
+```
+
+#### \~ pequenas alterações \~
+
+```{r}
+#| echo: FALSE
+#rodar 3 últimos pacotes da primeira aba
+# alterando a classe de cv e tempo (character --> numeric)
+
+resultados<- read_csv2('resultados.csv')
+
+resultados<-resultados %>% 
+  mutate(cv = str_replace(cv, ',', '.'), 
+         tempo = str_replace(tempo, ',', '.')) %>%
+  mutate(cv = as.numeric(cv), 
+         tempo = as.numeric(tempo)) %>%
+  mutate(cv = round(cv, 4), 
+         tempo = round(tempo, 4))
+
+#summary(resultados) 
+```
+
+## i ) Percentual de vitórias de cada Algoritmo:
+
+```{r}
+#| echo: FALSE
+
+# PARTE i: Percentual de vitórias em n=100 e n=200
+# pegando o menor cv/pop/L/n = menor cv em 120 casos diferentes 
+menor.cv.l.n<- resultados %>%
+  group_by(pop, L, n) %>%
+  summarise(min.cv.l.n = min(cv), .groups= 'drop')
+
+
+# menor cv/algoritmo/população/L/n
+menor.cv.alg.l.n<-resultados %>%
+  group_by(Algoritmo, pop, L, n) %>%
+  summarise(min.cv.alg.l.n = min(cv), .groups = 'drop')
+
+
+# verificando se cada algoritimo atingiu o menor cv/l/n
+vitorias<- menor.cv.alg.l.n %>%
+  left_join(menor.cv.l.n, by = c('pop', 'L', 'n')) %>%
+  mutate(vencedor = as.integer(min.cv.l.n == min.cv.alg.l.n))
+
+
+# contando quantas vezes cada algoritmo venceu
+contagem<- vitorias %>%
+  group_by(Algoritmo, L, n) %>%
+  summarise(contagem = sum(vencedor), .groups = 'drop') %>%
+  mutate(Percentual = 100*contagem/20)
+#View(contagem)
+
+
+# tabelas de Percentual
+percentual.100<- contagem %>%
+  filter(n==100) %>%
+  select(L, Algoritmo, Percentual) %>%
+  pivot_wider(names_from = Algoritmo, values_from = Percentual)
+#View(percentual.100)
+
+
+percentual.200<- contagem %>%
+  filter(n==200) %>%
+  select(L, Algoritmo, Percentual) %>%
+  pivot_wider(names_from = Algoritmo, values_from = Percentual)
+#View(percentual.200)
+
+percentual.100.xlsx<- write_xlsx(percentual.100, 'Percentual_100.xlsx')
+percentual.200.xlsx<- write_xlsx(percentual.200, 'Percentual_200.xlsx')
+  
+```
+
+## ii) Proporção de vitórias de algoritmo por população
+
+```{r}
+#| echo: FALSE
+
+# PARTE ii: Proporção de vitórias em n=100 e n=200
+# pegando o menor cv/pop/L/n
+menor.cv.l.n<- resultados %>%
+  group_by(pop, L, n) %>%
+  summarise(min.cv.l.n = min(cv), .groups= 'drop')
+
+
+# marcando apenas os menores cvs para fazer a proporção, continua com 8400 linhas
+cvs.marcados<-resultados %>%
+  left_join(menor.cv.l.n, by=c('pop', 'L', 'n')) %>%
+  mutate(vencedor = as.integer(cv == min.cv.l.n))
+
+
+# contar quantas vezes o algoritmo ai venceu na população pj
+aij<- cvs.marcados %>%
+  group_by(Algoritmo, pop, L, n) %>%
+  summarise(a_ij = sum(vencedor), .groups = 'drop')
+
+
+#somando aij ao longo das populações/ quantidade de vezes que o algoritmo deu certo
+total.por.algoritmo<- aij %>%
+  group_by(Algoritmo, L, n) %>%
+  summarise(tot.alg = sum(a_ij), .groups = 'drop')
+
+#calculando as proporções
+proporcao <- total.por.algoritmo %>%
+  group_by(L, n) %>%
+  mutate(Proporcao = tot.alg/ sum(tot.alg)) %>%
+  ungroup()
+
+
+proporcao.100<- proporcao %>%
+  filter(n==100) %>%
+  select(L, Algoritmo, Proporcao) %>%
+  pivot_wider(names_from = Algoritmo, values_from = Proporcao)
+#View(proporcao.100)
+
+proporcao.200<- proporcao %>%
+  filter(n==200) %>%
+  select(L, Algoritmo, Proporcao) %>%
+  pivot_wider(names_from = Algoritmo, values_from = Proporcao)
+#View(proporcao.200)
+
+proporcao.100.xlsx<- write_xlsx(proporcao.100, 'Proporcao_100.xlsx')
+proporcao.200.xlsx<- write_xlsx(proporcao.200, 'Proporcao_200.xlsx')
+
+
+```
+
+## iii) Valores medianos
+
+```{r}
+#| echo: FALSE
+
+#pega a mediana por recorte L x n por alg
+mediana.cv.alg.l.n <-resultados %>%
+  group_by(Algoritmo, pop, L, n) %>%
+  summarise(valores_medianos = median(cv), .groups = 'drop')
+View(mediana.cv.alg.l.n)
+
+
+todos.boxs <- mediana.cv.alg.l.n %>%
+  ggplot(aes(x = Algoritmo, y = valores_medianos, fill = Algoritmo)) + geom_boxplot() +
+  facet_grid(L ~ n, labeller = label_both) +
+  labs(title = "Conjunto de Box Plots",x = "Algoritmo", y = "CV mediano") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+(todos.boxs)
+
+
+#construir box plot por recorte de cada algoritmo, 20/ alg
+box.plot300<-mediana.cv.alg.l.n %>% 
+  filter (L==3, n == 100) %>%
+  ggplot(aes(x=Algoritmo , y=valores_medianos)) + geom_boxplot() +
+  labs(title = 'Box plot L = 3 e n = 100', x = 'Algoritmo', y = "CV mediano" )
+(box.plot300)
+
+box.plot400<-mediana.cv.alg.l.n %>% 
+  filter (L==4, n == 100) %>%
+  ggplot(aes(x=Algoritmo , y=valores_medianos)) + geom_boxplot() +
+  labs(title = 'Box plot L = 4 e n = 100' , x = 'Algoritmo', y = "CV mediano" )
+(box.plot400)
+
+box.plot500<-mediana.cv.alg.l.n %>% 
+  filter (L==5, n == 100) %>%
+  ggplot(aes(x=Algoritmo , y=valores_medianos)) + geom_boxplot() +
+  labs(title = 'Box plot L = 5 e n = 100', x = 'Algoritmo', y = "CV mediano" )
+(box.plot500)
+
+box.plot600<-mediana.cv.alg.l.n %>% 
+  filter (L==3, n == 200) %>%
+  ggplot(aes(x=Algoritmo , y=valores_medianos)) + geom_boxplot() +
+  labs(title = 'Box plot L = 3 e n = 200', x = 'Algoritmo', y = "CV mediano" )
+(box.plot600)
+
+box.plot800<-mediana.cv.alg.l.n %>% 
+  filter (L==4, n == 200) %>%
+  ggplot(aes(x=Algoritmo , y=valores_medianos)) + geom_boxplot() +
+  labs(title = 'Box plot L = 4 e n = 200', x = 'Algoritmo', y = "CV mediano" )
+(box.plot800)
+
+box.plot1000<-mediana.cv.alg.l.n %>% 
+  filter (L==5, n == 200) %>%
+  ggplot(aes(x=Algoritmo , y=valores_medianos)) + geom_boxplot() +
+  labs(title = 'Box plot L = 5 e n = 200', x = 'Algoritmo', y = "CV mediano" )
+(box.plot1000)
+```
+
+## iv) Rank Médio
+
+```{r}
+#| echo: FALSE
+
+#calcula o ranking em cada população
+rank.medianas<- mediana.cv.alg.l.n %>%
+  group_by(pop, L, n) %>%
+  mutate(rank = rank(valores_medianos, ties.method = 'average')) %>%
+  ungroup()
+#View(rank.medianas)
+
+#calcula o ranking médio de cada algoritmo
+rank.medio<-rank.medianas%>%
+  group_by(Algoritmo) %>%
+  summarise(rank_medio = mean(rank), .groups='drop')%>%
+  arrange(rank_medio)
+#View(rank.medio)
+
+rank.medio.xlsx<- write_xlsx(rank.medio, 'rank.medio.xlsx')
+
+```
